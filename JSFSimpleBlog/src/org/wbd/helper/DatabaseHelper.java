@@ -1,32 +1,43 @@
 package org.wbd.helper;
 
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.Date;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
+import java.io.IOException;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Date;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.Random;
+
+import net.thegreshams.firebase4j.service.Firebase;
+import net.thegreshams.firebase4j.error.FirebaseException;
+import net.thegreshams.firebase4j.error.JacksonUtilityException;
+import net.thegreshams.firebase4j.model.FirebaseResponse;
+
+import com.firebase.security.token.TokenGenerator;
 
 import org.wbd.model.*;
 
 public class DatabaseHelper {
-	public static final String URL = "jdbc:mysql://localhost:3306/simple_blog";
-	public static final String USER = "root";
-	public static final String PASSWORD = "";
+	public static final String URL = "https://glaring-torch-5979.firebaseio.com/";
+	public static final String SECRET_TOKEN = "kv9Dj5GohqbrKXLWmCQIVg3RF7fpbztrG1QF3Gct";
 	
 	private static DatabaseHelper instance;
-	private Connection conn;
-	private PreparedStatement statement;
-	private ResultSet result;
+
+	private Firebase firebase;
+	private FirebaseResponse response;
 	
 	private DatabaseHelper() {
-		conn = null;
-		statement = null;
-		result = null;
+		try {
+			firebase = new Firebase(URL, SECRET_TOKEN);
+		} catch (FirebaseException e) {
+			Logger logger = Logger.getLogger(Firebase.class.getName());
+			logger.log(Level.SEVERE, e.getMessage(), e);
+		}
 	}
 	
 	public static DatabaseHelper getInstance() {
@@ -38,214 +49,107 @@ public class DatabaseHelper {
 	
 	public List<User> getUsers() {
 		try {
-			connectDatabase(URL, USER, PASSWORD);
-			
-			String query = "SELECT * FROM user";
-			ArrayList<User> users = new ArrayList<User>();
-			statement = conn.prepareStatement(query);
-			statement.executeQuery();
-			result = statement.getResultSet();
-			
-			while(result.next()) {
-				User user = new User();
-				user.setUsername(result.getString(2));
-				user.setPassword(result.getString(3));
-				user.setRole(result.getString(4));
-				users.add(user);
+			response = firebase.get("User");
+			Map<String, Object> users = response.getBody();
+			List<User> temp = new ArrayList<User>();
+			for(Map.Entry<String, Object> entry : users.entrySet()) {
+				temp.add((User)entry.getValue());
 			}
-			
-			clearResult();
-			clearStatement();
-			disconnectDatabase();
-			return users;
-		} catch (SQLException ex) {
+			return temp;
+		} catch (FirebaseException e) {
+			Logger logger = Logger.getLogger(Firebase.class.getName());
+			logger.log(Level.SEVERE, e.getMessage(), e);
 			return null;
 		}
 	}
 	
-	public List<Post> getPosts(String username, boolean published) {
-		try {
-			connectDatabase(URL, USER, PASSWORD);
-			
-			String query = "SELECT post.id, post.title, post.date, post.content "
-					+ "FROM user JOIN post "
-					+ "WHERE user.username = ? AND "
-					+ "user.id = post.user_id AND "
-					+ "post.published = ?";
-			ArrayList<Post> posts = new ArrayList<Post>();
-			
-			statement = conn.prepareStatement(query);
-			statement.setString(1, username);
-			statement.setBoolean(2, published);
-			statement.executeQuery();
-			result = statement.getResultSet();
-			
-			while(result.next()) {
-				Post post = new Post();
-				post.setId(result.getInt(1));
-				post.setAuthor(username);
-				post.setTitle(result.getString(2));
-				post.setDate(result.getDate(3));
-				post.setContent(result.getString(4));
-				post.setPublished(published);
-				posts.add(post);
+	public List<Post> getPosts(String username, boolean published) throws FirebaseException {
+			response = firebase.get("Post");
+			Map<String, Object> posts = response.getBody();
+			List<Post> temp = new ArrayList<Post>();
+			for(Map.Entry<String, Object> entry : posts.entrySet()) {
+				Post post = (Post)entry.getValue();
+				if(post.getAuthor() == username) temp.add(post);
 			}
-			
-			return posts;
-		} catch (SQLException ex) {
-			Logger logger = Logger.getLogger(DriverManager.class.getName());
-			logger.log(Level.SEVERE, ex.getMessage(), ex);
-			return null;
-		} finally {
-			clearResult();
-			clearStatement();
-			disconnectDatabase();
-		}
+			return temp;
 	}
 
-	public Post getPost(int postId) {
-		try {
-			connectDatabase(URL, USER, PASSWORD);
-			
-			String query =
-				"SELECT post.id, post.title, post.date, post.content, user.username, post.published "
-					+ "FROM user JOIN post "
-					+ "WHERE post.id = ? ";
-			
-			statement = conn.prepareStatement(query);
-			statement.setInt(1, postId);
-			statement.executeQuery();
-			result = statement.getResultSet();
-			Post post = new Post();
-			if (result.next()) {
-				post.setId(result.getInt(1));
-				post.setAuthor(result.getString(5));
-				post.setTitle(result.getString(2));
-				post.setDate(result.getDate(3));
-				post.setContent(result.getString(4));
-				post.setPublished(result.getBoolean(6));
-			}
-			
-			return post;
-		} catch (SQLException ex) {
-			Logger logger = Logger.getLogger(DriverManager.class.getName());
-			logger.log(Level.SEVERE, ex.getMessage(), ex);
-			return null;
-		} finally {
-			clearResult();
-			clearStatement();
-			disconnectDatabase();
-		}
+	public Post getPost(int postId) throws FirebaseException, ParseException {
+			response = firebase.get("Post/" + postId);
+			Map<String, Object> post = response.getBody();
+			//Map.Entry<String, Object> entry = post.entrySet();
+			Post temp = new Post();
+			temp.setAuthor((String)post.get("author"));
+			temp.setContent((String)post.get("content"));
+			temp.setTitle((String)post.get("title"));
+			temp.setPublished((boolean)post.get("published"));
+			Date date = SimpleDateFormat.getInstance().parse(
+						(String)post.get("date")
+					);
+			temp.setDate(date);
+			return temp;
 	}
 	
-	public void addPost(String username, String title, Date date, String content) {
-		try {
-			connectDatabase(URL, USER, PASSWORD);
+	public void addPost(String username, String title, Date date, String content) 
+			throws JacksonUtilityException, FirebaseException {
+			response = firebase.get("Post/post_count");
+			int id = Integer.parseInt(response.getRawBody()) + 1;
 			
-			statement = conn.prepareStatement("SELECT id FROM user WHERE username = ?");
-			statement.setString(1, username);
-			result = statement.executeQuery();
-			result.next();
-			String userID = result.getString(1);
+			//make a post data
+			Map<String, Object> dataMap = new LinkedHashMap<String, Object>();
+			Map<String, Object> dataMap2 = new LinkedHashMap<String, Object>();
+			dataMap2.put("author", username);
+			dataMap2.put("title", title);
+			dataMap2.put("date", date);
+			dataMap2.put("content", content);
+			dataMap2.put("published", false);
+			dataMap2.put(String.valueOf(id), dataMap2);
 			
-			String query = "INSERT INTO post (title, date, content, user_id, published) "
-					+ "VALUES (?, ?, ?, ?, ?)";
+			//add a post data
+			firebase.put("Post", dataMap);
 			
-			statement = conn.prepareStatement(query);
-			statement.setString(1, title);
-			statement.setDate(2, date);
-			statement.setString(3, content);
-			statement.setString(4, userID);
-			statement.setBoolean(5, false);
-			statement.executeUpdate();
-		} catch (SQLException ex) {
-			Logger logger = Logger.getLogger(DriverManager.class.getName());
-			logger.log(Level.SEVERE, ex.getMessage(), ex);
-		} finally {
-			clearResult();
-			clearStatement();
-			disconnectDatabase();
-		}
+			//update post count
+			Map<String, Object> count = new LinkedHashMap<String, Object>();
+			count.put("post_count", id);
+			firebase.patch("Post", count);
 	}
 	
-	public void publishPost(int postId) {
-		try {
-			connectDatabase(URL, USER, PASSWORD);
-			
-			String query = "UPDATE post "
-					+ "SET published=? "
-					+ "WHERE id=? ";
-			
-			statement = conn.prepareStatement(query);
-			statement.setBoolean(1, true);
-			statement.setInt(2, postId);
-			statement.executeUpdate();
-			
-		} catch (SQLException ex) {
-			Logger logger = Logger.getLogger(DriverManager.class.getName());
-			logger.log(Level.SEVERE, ex.getMessage(), ex);
-		} finally {
-			clearResult();
-			clearStatement();
-			disconnectDatabase();
-		}
+	public void publishPost(int postId) throws FirebaseException, JacksonUtilityException {
+		Map<String, Object> post = new LinkedHashMap<String, Object>();
+		Map<String, Object> publish = new LinkedHashMap<String, Object>();
+		
+		publish.put("published", true);
+		post.put(String.valueOf(postId), publish);
+		
+		firebase.patch("Post", post);
 	}
 	
-	public void updatePost(int postId, String title, Date date, String content) {
-		try {
-			connectDatabase(URL, USER, PASSWORD);
-			
-			String query = "UPDATE post "
-					+ "SET title=?, date=?, content=? "
-					+"WHERE id = ? ";
-			
-			statement = conn.prepareStatement(query);
-			statement.setString(1, title);
-			statement.setDate(2, date);
-			statement.setString(3, content);
-			statement.setInt(4, postId);
-			statement.executeUpdate();
-			
-		} catch (SQLException ex) {
-			Logger logger = Logger.getLogger(DriverManager.class.getName());
-			logger.log(Level.SEVERE, ex.getMessage(), ex);
-		} finally {
-			clearResult();
-			clearStatement();
-			disconnectDatabase();
-		}
+	public void updatePost(int postId, String title, Date date, String content) throws FirebaseException, JacksonUtilityException {
+		
+		Map<String, Object> id = new LinkedHashMap<String, Object>();
+		Map<String, Object> post = new LinkedHashMap<String, Object>();
+		
+		post.put("title", title);
+		post.put("date", date);
+		post.put("content", content);
+		
+		id.put(String.valueOf(postId), post);
+		
+		firebase.patch("Post", id);
 	}
 	
-	public void deletePost(int postId) {
-		try {
-			connectDatabase(URL, USER, PASSWORD);
-			
-			String query = "INSERT INTO deleted_posts SELECT * FROM post "
-					+ "WHERE post.id = ? ";
-
-			statement = conn.prepareStatement(query);
-			statement.setInt(1, postId);
-			statement.executeUpdate();
-			
-			query = "DELETE FROM post "
-					+ "WHERE post.id = ? ";
-
-			statement = conn.prepareStatement(query);
-			statement.setInt(1, postId);
-			statement.executeUpdate();
-
-		} catch (SQLException ex) {
-			Logger logger = Logger.getLogger(DriverManager.class.getName());
-			logger.log(Level.SEVERE, ex.getMessage(), ex);
-		} finally {
-			clearResult();
-			clearStatement();
-			disconnectDatabase();
-		}
+	public void deletePost(int postId) throws FirebaseException, JacksonUtilityException {
+		Map<String, Object> id = new LinkedHashMap<String, Object>();
+		Map<String, Object> post = new LinkedHashMap<String, Object>();
+		
+		post.put("deleted", true);
+		id.put(String.valueOf(postId), post);
+		
+		firebase.patch(id);
 	}
 	
 	public List<Post> getDeletedPosts(String username) {
-		try {
+		/*try {
 			connectDatabase(URL, USER, PASSWORD);
 			
 			String query = "SELECT post.id, post.title, post.date, post.content, post.published "
@@ -280,10 +184,12 @@ public class DatabaseHelper {
 			clearStatement();
 			disconnectDatabase();
 		}
+		*/
 	}
 
-	public void undoDeletePost(int postId) {
-		try {
+	public void undoDeletePost(int postId) throws FirebaseException {
+		firebase.delete("Post/" + postId + "/deleted");
+		/*try {
 			connectDatabase(URL, USER, PASSWORD);
 			
 			String query = "INSERT INTO post SELECT * FROM deleted_posts "
@@ -308,10 +214,12 @@ public class DatabaseHelper {
 			clearStatement();
 			disconnectDatabase();
 		}
+		*/
 	}
 	
-	public void finalDeletePost(int postId) {
-		try {
+	public void finalDeletePost(int postId) throws FirebaseException {
+		firebase.delete("Post/" + postId);
+		/*try {
 			connectDatabase(URL, USER, PASSWORD);
 			
 			String query = "DELETE FROM deleted_posts "
@@ -329,6 +237,7 @@ public class DatabaseHelper {
 			clearStatement();
 			disconnectDatabase();
 		}
+		*/
 	}
 	
 	public ArrayList<Comment> getComments(int postId) {
@@ -446,7 +355,7 @@ public class DatabaseHelper {
 		} 
 	}
 	
-	private void connectDatabase(String url, String user, String password) {
+	/*private void connectDatabase(String url, String user, String password) {
 		try {
 			Class.forName("com.mysql.jdbc.Driver");
 			conn = DriverManager.getConnection(url, user, password);
@@ -490,5 +399,6 @@ public class DatabaseHelper {
 			logger.log(Level.SEVERE, ex.getMessage(), ex);
 		}
 	}
+	*/
 	
 }
